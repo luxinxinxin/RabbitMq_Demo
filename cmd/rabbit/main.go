@@ -6,11 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"rabbitmq_demo/internal/publisher"
 	"strconv"
 	"strings"
 
 	"rabbitmq_demo/internal/consumer"
+	"rabbitmq_demo/internal/publisher"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
