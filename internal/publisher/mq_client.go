@@ -22,7 +22,10 @@ func newRabbitMq() IRabbitMQ {
 }
 
 func (r *RabbitMQ) Start() error {
-	r.NewRabbitMQCli("at", "ex.direct", "at", "amqp://root:123456@192.168.0.104:5672/")
+	err := r.NewRabbitMQCli("at", "ex.direct", "at", "amqp://root:123456@192.168.0.104:5672/")
+	if err != nil {
+		log.Panic().Msg("creat connect failed!")
+	}
 	r.PublishSimple("hello world!")
 	<-r.die
 	return nil
@@ -33,7 +36,7 @@ func (r *RabbitMQ) Stop() {
 }
 
 //创建RabbitMQ结构体实例
-func (r *RabbitMQ) NewRabbitMQCli(queueName string, exchange string, key string, mqurl string) {
+func (r *RabbitMQ) NewRabbitMQCli(queueName string, exchange string, key string, mqurl string) error {
 	r.QueueName = queueName
 	r.Exchange = exchange
 	r.Key = key
@@ -42,10 +45,18 @@ func (r *RabbitMQ) NewRabbitMQCli(queueName string, exchange string, key string,
 	var err error
 	//创建rabbitmq连接
 	r.conn, err = amqp.Dial(r.Mqurl)
-	r.failOnErr(err, "创建连接错误")
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", "创建连接错误", err)
+		return err
+	}
+
 	r.channel, err = r.conn.Channel()
-	r.failOnErr(err, "获取Channel失败")
-	return
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", "获取Channel失败", err)
+		return err
+	}
+
+	return nil
 }
 
 //断开channel和connection
