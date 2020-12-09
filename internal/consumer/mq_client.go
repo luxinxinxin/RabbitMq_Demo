@@ -1,9 +1,9 @@
 package consumer
 
 import (
-	"fmt"
 	"github.com/rs/zerolog/log"
 	"github.com/streadway/amqp"
+	"time"
 )
 
 type RabbitMQ struct {
@@ -23,8 +23,9 @@ func newRabbitMq() IRabbitMQ {
 }
 
 func (r *RabbitMQ) Start() error {
-	fmt.Println(111)
 	r.NewRabbitMQCli("at", "ex.direct", "at", "amqp://root:123456@192.168.0.104:5672/")
+	defer r.Destoryy()
+
 	r.ConsumeSimple()
 	<-r.die
 	return nil
@@ -122,13 +123,33 @@ func (r *RabbitMQ) ConsumeSimple() {
 	)
 	r.failOnErr(err, "consume")
 
+	closeChan := make(chan *amqp.Error, 1)
+	notifyClose := r.channel.NotifyClose(closeChan) //一旦消费者的channel有错误，产生一个amqp.Error，channel监听并捕捉到这个错误
+	closeFlag := false
 	forever := make(chan bool)
 
 	//3、启动协程处理消息
 	go func() {
-		for d := range msgs {
+		/*for d := range msgs {
 			//实现我们要处理的逻辑函数
 			log.Printf("Received a message : %s", d.Body)
+		}*/
+		for {
+			select {
+			case e := <-notifyClose:
+				log.Error().Msgf("chan通道错误,e:%s", e.Error())
+				close(closeChan)
+				time.Sleep(1 * time.Second)
+				r.ConsumeSimple()
+				closeFlag = true
+			case msg := <-msgs:
+				//实现我们要处理的逻辑函数
+				log.Printf("Received a message : %s", msg.Body)
+
+			}
+			if closeFlag {
+				break
+			}
 		}
 	}()
 
