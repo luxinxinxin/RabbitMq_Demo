@@ -1,6 +1,7 @@
 package publisher
 
 import (
+	"errors"
 	"github.com/rs/zerolog/log"
 	"github.com/streadway/amqp"
 )
@@ -10,7 +11,7 @@ type RabbitMQ struct {
 	conn      *amqp.Connection
 	channel   *amqp.Channel
 	QueueName string //队列名称
-	Exchange  string //交换机
+	Exchange  string //交换器
 	Key       string //Key
 	Mqurl     string //连接信息
 }
@@ -27,6 +28,7 @@ func (r *RabbitMQ) Start() error {
 		log.Panic().Msg("creat connect failed!")
 	}
 	r.PublishSimple("hello world!")
+	r.ConsumeSimple()
 	<-r.die
 	return nil
 }
@@ -59,6 +61,117 @@ func (r *RabbitMQ) NewRabbitMQCli(queueName string, exchange string, key string,
 	return nil
 }
 
+func (r *RabbitMQ) init() error {
+	if err := r.QueueDeclare(r.QueueName); err != nil {
+		log.Error().Msgf("%s:%s\n", "r.QueueDeclare", err)
+		return err
+	}
+
+	if err := r.ExchangeDeclare("", ""); err != nil {
+		log.Error().Msgf("%s:%s\n", "r.QueueDeclare", err)
+		return err
+	}
+
+	if err := r.QueueBind("", "",""); err != nil {
+		log.Error().Msgf("%s:%s\n", "r.QueueBind", err)
+		return err
+	}
+
+	return nil
+}
+
+//创建队列
+func (r *RabbitMQ) QueueDeclare(queueName string) error {
+	if queueName == "" {
+		return errors.New("QueueName not found")
+	}
+
+	//1、申请消息队列，如果队列不存在会自动创建，如果存在则跳过创建
+	_, err := r.channel.QueueDeclare(
+		r.QueueName,
+		//是否持久化
+		true,
+		//是否为自动删除
+		false,
+		//是否具有排他性
+		false,
+		//是否阻塞
+		false,
+		//额外属性
+		nil,
+	)
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", "QueueDeclare失败", err)
+		return err
+	}
+	return nil
+}
+
+//创建交换器
+func (r *RabbitMQ) ExchangeDeclare(name, kind string) error {
+	//todo，校验
+	err := r.channel.ExchangeDeclare(
+		//交换器名称
+		name,
+		//交换器类型
+		kind,
+		//持久化标识
+		true,
+		//是否自动删除
+		false,
+		//是否是内置交换器
+		false,
+		//是否等待服务器确认
+		true,
+		//其它配置
+		nil)
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", "ExchangeDeclare", err)
+		return err
+	}
+	return nil
+}
+
+//绑定交换器和队列
+func (r *RabbitMQ) QueueBind(name, key, exchange string) error {
+	//todo，校验
+	err := r.channel.QueueBind(
+		//队列名称
+		name,
+		//根据交换器类型来设定
+		key,
+		//交换器名称
+		exchange,
+		//是否等待服务器确认
+		true,
+		nil)
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", "QueueBind", err)
+		return err
+	}
+	return nil
+}
+
+//绑定交换器（可选）
+func (r *RabbitMQ) ExchangeBind(des, key, src string) error {
+	//todo，校验
+	err := r.channel.ExchangeBind(
+		//目的交换器
+		des,
+		//路由键
+		key,
+		//源交换器
+		src,
+		//是否等待服务器确认
+		false,
+		nil)
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", "QueueBind", err)
+		return err
+	}
+	return nil
+}
+
 //断开channel和connection
 func (r *RabbitMQ) Destoryy() {
 	r.channel.Close()
@@ -75,7 +188,7 @@ func (r *RabbitMQ) failOnErr(err error, message string) {
 //简单模式Step：2、简单模式下生产代码
 func (r *RabbitMQ) PublishSimple(message string) {
 	//1、申请消息队列，如果队列不存在会自动创建，如果存在则跳过创建
-	//好处：宝成队列存在，消息能发送到队列中
+	//好处：保证队列存在，消息能发送到队列中
 	_, err := r.channel.QueueDeclare(
 		r.QueueName,
 		//是否持久化
@@ -93,8 +206,10 @@ func (r *RabbitMQ) PublishSimple(message string) {
 
 	//2、发送消息到队列中
 	err = r.channel.Publish(
+		//交换器名称
 		r.Exchange,
-		r.QueueName,
+		//路由键
+		r.Key,
 		//如果为true，根据exchange类型和routkey规则，如果无法找到符合条件的队列，那么会把发送的消息返回给发送者
 		true,
 		//如果为true，当exchange发送消息到队列侯发现队列上没有绑定消费者，则会把消息发还给发送者
@@ -114,7 +229,7 @@ func (r *RabbitMQ) ConsumeSimple() {
 	//1、申请队列
 	_, err := r.channel.QueueDeclare(r.QueueName, true, false, false, false, nil)
 	r.failOnErr(err, "consume queue declare")
-	//2、接收消息
+	//接收消息
 	msgs, err := r.channel.Consume(
 		r.QueueName,
 		//用来区分多个消费者
