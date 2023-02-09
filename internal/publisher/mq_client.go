@@ -3,7 +3,6 @@ package publisher
 import (
 	"errors"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"time"
 )
@@ -25,34 +24,19 @@ func newRabbitMq() IRabbitMQ {
 }
 
 func (r *RabbitMQ) Start() error {
-	queueName := viper.GetString("RabbitMQ.QueueName")
-	exchange := viper.GetString("RabbitMQ.Exchange")
-	key := viper.GetString("RabbitMQ.Key")
-	mqurl := viper.GetString("RabbitMQ.Mqurl")
-	log.Info().Msgf("queueName:%s,exchange:%s,key:%s,mqurl:%s", queueName, exchange, key, mqurl)
-
-	err := r.NewRabbitMQCli(queueName, exchange, key, mqurl)
+	err := r.NewRabbitMQCli("at", "ex.direct", "at", "amqp://root:123456@192.168.0.104:5672/")
 	if err != nil {
-		log.Panic().Msgf("creat connect failed!,error:%s", err.Error())
+		log.Panic().Msg("creat connect failed!")
 	}
-	defer r.Destory()
+	defer r.Destoryy()
 
 	err = r.init()
 	if err != nil {
 		log.Panic().Msg(err.Error())
 	}
 
-	go func() {
-		for {
-			err = r.PublishSimple("hello world!" + time.Now().String())
-			if err != nil {
-				log.Panic().Msgf("PublishSimple failed!,error:%s", err.Error())
-			}
-			time.Sleep(2 * time.Second)
-		}
-	}()
-
-	//r.ConsumeSimple()
+	r.PublishSimple("hello world!")
+	r.ConsumeSimple()
 	<-r.die
 	return nil
 }
@@ -197,13 +181,20 @@ func (r *RabbitMQ) ExchangeBind(des, key, src string) error {
 }
 
 //断开channel和connection
-func (r *RabbitMQ) Destory() {
+func (r *RabbitMQ) Destoryy() {
 	r.channel.Close()
 	r.conn.Close()
 }
 
+//错误处理函数
+func (r *RabbitMQ) failOnErr(err error, message string) {
+	if err != nil {
+		log.Error().Msgf("%s:%s\n", message, err)
+	}
+}
+
 //简单模式Step：2、简单模式下生产代码
-func (r *RabbitMQ) PublishSimple(message string) error {
+func (r *RabbitMQ) PublishSimple(message string) {
 	//此处队列已提前申请，若无则需要申请
 	//2.发送消息到队列中
 	err := r.channel.Publish(
@@ -221,20 +212,18 @@ func (r *RabbitMQ) PublishSimple(message string) error {
 		})
 	if err != nil {
 		log.Error().Msgf("%s:%s\n", "publish", err)
-		return err
 	}
 	log.Debug().Msgf("publish:%s\n", message)
-	return nil
 }
 
 //简单模式Step：3、消费
-func (r *RabbitMQ) ConsumeSimple() error {
+func (r *RabbitMQ) ConsumeSimple() {
 	//此处队列已提前申请，若无则需要申请
 	//接收消息
 	msgs, err := r.channel.Consume(
 		r.QueueName,
 		//用来区分多个消费者
-		"a",
+		"",
 		//是否自动应答
 		true,
 		//是否具有排他性
@@ -245,10 +234,7 @@ func (r *RabbitMQ) ConsumeSimple() error {
 		false,
 		nil,
 	)
-	if err != nil {
-		log.Error().Msgf("%s:%s\n", "consume", err)
-		return err
-	}
+	r.failOnErr(err, "consume")
 
 	closeChan := make(chan *amqp.Error, 1)
 	notifyClose := r.channel.NotifyClose(closeChan) //一旦消费者的channel有错误，产生一个amqp.Error，channel监听并捕捉到这个错误
@@ -283,5 +269,4 @@ func (r *RabbitMQ) ConsumeSimple() error {
 	log.Printf("[*] Waiting for messagees,To exit press CTRL+C")
 
 	<-forever
-	return nil
 }
