@@ -1,5 +1,0 @@
-[RabbitMQ]
-    QueueName = "at"
-    Exchange="ex.direct"
-    Key = "at"
-    Mqurl ="amqp://lxx:123456@192.168.2.181:5672/"
